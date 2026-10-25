@@ -1,0 +1,71 @@
+name: Build APK
+
+# Every push to main builds a test APK (under the run's Artifacts).
+# Pushing a tag like v1.0.0 also publishes a GitHub Release with the APK.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate the Android project
+        run: flutter create --org com.pinroulette --project-name pin_roulette --platforms android .
+
+      - name: Add share target and native code
+        run: dart tool/setup_android.dart
+
+      - run: flutter pub get
+
+      - name: Check the code
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build APK
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            flutter build apk --release --build-name="$VERSION" --build-number="${GITHUB_RUN_NUMBER}"
+          else
+            flutter build apk --release --build-number="${GITHUB_RUN_NUMBER}"
+          fi
+          cp build/app/outputs/flutter-apk/app-release.apk pin-roulette.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pin-roulette-apk
+          path: pin-roulette.apk
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Pin Roulette ${{ github.ref_name }}
+          files: pin-roulette.apk
+          generate_release_notes: true
+          body: |
+            Download **pin-roulette.apk** below and open it on your Android phone.
+            The first time, Android asks you to allow installs from your browser or Files app.
+
+            Pick a place from a Google Maps link or saved list with 22 games of chance.
